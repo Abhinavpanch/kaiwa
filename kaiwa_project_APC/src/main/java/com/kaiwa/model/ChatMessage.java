@@ -26,4 +26,10 @@ public class ChatMessage {
     private String content;
 
     private Instant timestamp;
+
+    /** For direct messages: the receiving user. Null for channel messages. */
+    private String recipient;
+
+    /** Read receipt for direct messages. Ignored for channel messages. */
+    private boolean read;
 }

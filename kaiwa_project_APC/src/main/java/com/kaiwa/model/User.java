@@ -23,8 +23,14 @@ public class User {
     @Indexed(unique = true)
     private String username;
 
+    @Indexed(unique = true)
+    private String email;
+
     @Password
     private String password;
 
     private Set<String> roles;
+
+    /** True once the account's email has been verified via OTP. */
+    private boolean verified;
 }

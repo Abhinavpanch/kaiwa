@@ -3,229 +3,773 @@
 <head>
     <title>Kaiwa Chat</title>
     <link rel="stylesheet" th:href="@{/css/style.css}" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Tailwind Play CDN config: fade-up entrance animation
+        tailwind.config = {
+            theme: {
+                extend: {
+                    keyframes: {
+                        'fade-up': {
+                            '0%': { opacity: '0', transform: 'translateY(24px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' }
+                        }
+                    },
+                    animation: {
+                        'fade-up': 'fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) both'
+                    }
+                }
+            }
+        };
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
 </head>
-<body>
 
-<div class="chat-page-container">
+<body class="relative h-screen overflow-hidden bg-gradient-to-tr from-indigo-900 via-purple-900 to-pink-800 font-sans antialiased">
 
-    <aside class="chat-sidebar">
-        <div class="sidebar-header">
-            <h2>Kaiwa Chat</h2>
-            <p>Welcome, <strong sec:authentication="name" id="currentUser">User</strong></p>
-        </div>
+    <!-- Ambient background blobs -->
+    <div class="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-fuchsia-500 opacity-40 blur-3xl"></div>
+    <div class="pointer-events-none absolute -right-24 top-1/3 h-80 w-80 rounded-full bg-cyan-400 opacity-30 blur-3xl"></div>
+    <div class="pointer-events-none absolute -bottom-40 left-1/4 h-96 w-96 rounded-full bg-indigo-400 opacity-40 blur-3xl"></div>
+    <div class="pointer-events-none absolute bottom-10 right-1/4 h-64 w-64 rounded-full bg-pink-400 opacity-30 blur-3xl"></div>
 
+    <div class="relative z-10 flex h-full w-full gap-4 p-4">
 
-        <div class="users-list">
-            <h3 color="white"><b>Channels</b></h3>
-            <ul id="roomsList">
+        <!-- Mobile drawer backdrop (click to close) -->
+        <div id="sidebarBackdrop"
+             class="pointer-events-none fixed inset-0 z-20 bg-black/50 opacity-0 backdrop-blur-sm transition-opacity duration-300 md:hidden"></div>
 
-            </ul>
-            <form id="createRoomForm" style="margin-top:1rem;">
-                <input type="text" id="newRoomName" placeholder="➕ New channel..." required />
+        <!-- ============ Glass sidebar (off-canvas drawer on mobile, static on md+) ============ -->
+        <aside id="sidebar"
+               class="fixed inset-y-4 left-4 z-30 flex w-64 -translate-x-full flex-col rounded-3xl border border-white/20 bg-white/10 p-5 shadow-2xl shadow-black/40 backdrop-blur-lg transition-transform duration-300 ease-out md:static md:inset-auto md:z-auto md:translate-x-0 md:shrink-0">
+
+            <div class="relative">
+                <div class="pointer-events-none absolute inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent"></div>
+
+                <div class="border-b border-white/10 pb-4">
+                    <h2 class="text-xl font-bold text-white">Kaiwa Chat</h2>
+                    <p class="mt-1 text-sm text-white/60">
+                        Welcome, <strong sec:authentication="name" id="currentUser" class="font-semibold text-white/90">User</strong>
+                    </p>
+                </div>
+
+                <div class="mt-4 flex-1 overflow-y-auto">
+                    <!-- Collapsible channels header (+ chevron) -->
+                    <div class="mb-2 flex items-center justify-between">
+                        <h3 class="text-xs font-semibold uppercase tracking-widest text-white/50">Channels</h3>
+                        <button id="channelsChevron" type="button"
+                                class="flex h-6 w-6 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-sm leading-none text-white/80 transition hover:bg-white/15">
+                            <svg id="channelsChevronIcon" xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="channelsBody" class="space-y-1" data-collapse="open">
+                        <ul id="roomsList" class="space-y-1"></ul>
+                        <form id="createRoomForm" class="mt-4">
+                        <input type="text" id="newRoomName" placeholder="➕ New channel..." required
+                               class="w-full rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm text-white placeholder-white/40 outline-none transition focus:border-white/40 focus:bg-white/10" />
+                    </form>
+                    </div>
+
+                    <!-- ============ Direct Messages ============ -->
+                    <div class="mt-6">
+                        <div class="mb-2 flex items-center justify-between">
+                            <h3 class="text-xs font-semibold uppercase tracking-widest text-white/50">Direct Messages</h3>
+                            <button id="dmToggle" type="button" aria-label="Start a new direct message"
+                                    class="flex h-6 w-6 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-sm leading-none text-white/80 transition hover:bg-white/15">+</button>
+                        </div>
+
+                        <!-- New DM user search (hidden by default) -->
+                        <div id="dmSearchWrap" class="mb-2 hidden">
+                            <input id="dmSearch" type="text" placeholder="Search users..." autocomplete="off"
+                                   class="w-full rounded-full border border-white/15 bg-white/5 px-3.5 py-2 text-sm text-white placeholder-white/40 outline-none transition focus:border-white/40 focus:bg-white/10" />
+                            <ul id="dmSearchResults" class="mt-1.5 space-y-0.5"></ul>
+                        </div>
+
+                        <ul id="dmList" class="space-y-1"></ul>
+                    </div>
+                </div>
+
+                <div class="border-t border-white/10 pt-4">
+                    <a th:href="@{/logout}"
+                       class="block w-full rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-center text-sm font-semibold text-white/90 transition hover:bg-white/15">Logout</a>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ============ Glass chat panel ============ -->
+        <main class="relative flex min-w-0 flex-1 animate-fade-up flex-col overflow-hidden rounded-3xl border border-white/20 bg-white/10 shadow-2xl shadow-black/40 backdrop-blur-lg [animation-delay:150ms]">
+
+            <div class="pointer-events-none absolute inset-x-6 top-0 z-10 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent"></div>
+
+            <header class="relative flex items-center gap-3 border-b border-white/10 px-6 py-4">
+                <!-- Full sidebar collapse toggle (visible on desktop) -->
+                <button id="sidebarCollapseToggle" type="button" aria-label="Toggle sidebar"
+                        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-white/90 transition hover:bg-white/15 hidden md:flex">
+                    <svg id="sidebarCollapseIcon" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
+                <!-- Mobile drawer button (only on small screens) -->
+                <button id="sidebarToggle" type="button" aria-label="Open channels"
+                        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-white/90 transition hover:bg-white/15 md:hidden">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                </button>
+
+                <!-- Channel mode header -->
+                <div id="channelHeader" class="min-w-0" th:classappend="${dmMode == true ? 'hidden' : ''}">
+                    <h3 id="room-title" class="truncate text-lg font-semibold text-white">#<span th:text="${roomName}">general</span></h3>
+                </div>
+
+                <!-- DM mode header -->
+                <div id="dmHeader" class="hidden min-w-0 flex-1 items-center gap-3">
+                    <div id="dmHeaderAvatar" class="avatar-chip lg"></div>
+                    <div class="min-w-0 flex-1">
+                        <p id="dmHeaderName" class="truncate text-lg font-semibold text-white">@username</p>
+                        <p id="dmHeaderStatusLine" class="flex items-center gap-1.5 text-xs text-white/50">
+                            <span id="dmHeaderDot" class="dot dot-offline"></span>
+                            <span id="dmHeaderStatusText">Offline</span>
+                        </p>
+                    </div>
+                    <button id="dmProfileBtn" type="button" aria-label="View profile"
+                            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-lg leading-none text-white/80 transition hover:bg-white/15">…</button>
+                </div>
+
+                <!-- DM profile popover -->
+                <div id="dmProfilePopover"
+                     class="absolute right-6 top-full z-20 mt-2 hidden w-64 rounded-2xl border border-white/20 bg-white/10 p-5 shadow-2xl shadow-black/40 backdrop-blur-lg">
+                    <div class="flex items-center gap-3">
+                        <div id="popAvatar" class="avatar-chip xl"></div>
+                        <div class="min-w-0">
+                            <p id="popName" class="truncate text-sm font-semibold text-white">@username</p>
+                            <p id="popStatusLine" class="flex items-center gap-1.5 text-xs text-white/50">
+                                <span id="popDot" class="dot dot-offline"></span>
+                                <span id="popStatusText">Offline</span>
+                            </p>
+                        </div>
+                    </div>
+                    <p class="mt-3 border-t border-white/10 pt-3 text-xs leading-relaxed text-white/50">
+                        Direct messages with this user — stored only in this conversation.
+                    </p>
+                </div>
+            </header>
+
+            <div class="chat-messages min-h-0 flex-1 overflow-y-auto px-6 py-5" id="chatBox"></div>
+
+            <form class="chat-input-form flex items-center gap-3 border-t border-white/10 p-4" id="messageForm">
+                <input type="text" id="message" placeholder="Type a message..." autocomplete="off"
+                       class="min-w-0 flex-1 rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm text-white placeholder-white/40 outline-none transition focus:border-white/40 focus:bg-white/10" />
+                <button type="submit"
+                        class="shrink-0 rounded-full bg-white/20 px-6 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-white/30 focus:outline-none focus:ring-2 focus:ring-white/40">
+                    Send
+                </button>
             </form>
-        </div>
+        </main>
+
+        <!-- Mobile drawer backdrop (click to close) — mirror if sidebar is hidden on desktop -->
+        <div id="sidebarBackdropDesktop"
+             class="pointer-events-none fixed inset-0 z-20 bg-black/40 backdrop-blur-sm opacity-0 transition-opacity duration-300 hidden"></div>
+    </div>
+
+    <script th:inline="javascript">
+        let stompClient = null;
+        let currentSubscription = null;
+        let currentMode = /*[[${dmMode == true ? 'dm' : 'channel'}]]*/ 'channel';
+        let currentRoom = /*[[${roomId}]]*/ null;
+        let currentRoomName = /*[[${roomName}]]*/ null;
+        let currentDmUser = /*[[${dmUser}]]*/ null;
+        const currentUsername = document.getElementById('currentUser').textContent;
 
 
+        function connect() {
+            const socket = new SockJS('/ws');
+            stompClient = Stomp.over(socket);
+            // Add error handling
+            stompClient.connect({ username: currentUsername },
+                function (frame) {
+                    console.log("✅ Connected: " + frame);
+                    subscribeToDmTopic();
+                    if (currentMode === 'dm') {
+                        enterDm();
+                    } else {
+                        subscribeToRoom(currentRoom);
+                        loadMessageHistory(currentRoom);
+                    }
+                    loadConversations();
+                },
+                function (error) {
+                    console.error("❌ WebSocket connection failed:", error);
+                    // Attempt reconnection
+                    setTimeout(() => {
+                        console.log("🔄 Attempting to reconnect...");
+                        connect();
+                    }, 3000);
+                }
+            );
+        }
 
 
-        <div class="sidebar-footer">
-            <a th:href="@{/logout}" class="btn">Logout</a>
-        </div>
-    </aside>
-
-
-    <main class="chat-main" >
-        <header class="chat-header">
-            <h3 id="room-title">#<span th:text="${roomName}">general</span></h3>
-
-        </header>
-
-        <div class="chat-messages" id="chatBox">
-
-        </div>
-
-        <form class="chat-input-form" id="messageForm">
-            <input type="text" id="message" placeholder="Type a message..." autocomplete="off" />
-            <button type="submit">Send</button>
-        </form>
-    </main>
-</div>
-
-<script th:inline="javascript">
-    let stompClient = null;
-    let currentSubscription = null;
-    let currentRoom = /*[[${roomId}]]*/ "general";
-    let currentRoomName = /*[[${roomName}]]*/ "general";
-    const currentUsername = document.getElementById('currentUser').textContent;
-
-
-    function connect() {
-        const socket = new SockJS('/ws');
-        stompClient = Stomp.over(socket);
-        // Add error handling
-        stompClient.connect({},
-            function (frame) {
-                console.log("✅ Connected: " + frame);
-                subscribeToRoom(currentRoom);
-                loadMessageHistory(currentRoom);
-            },
-            function (error) {
-                console.error("❌ WebSocket connection failed:", error);
-                // Attempt reconnection
-                setTimeout(() => {
-                    console.log("🔄 Attempting to reconnect...");
-                    connect();
-                }, 3000);
+        function subscribeToRoom(roomId) {
+            if (currentSubscription) {
+                currentSubscription.unsubscribe();
+                console.log("🔌 Unsubscribed from previous room");
             }
-        );
-    }
 
-
-    function subscribeToRoom(roomId) {
-        if (currentSubscription) {
-            currentSubscription.unsubscribe();
-            console.log("🔌 Unsubscribed from previous room");
-        }
-
-        if (stompClient && stompClient.connected) {
-            currentSubscription = stompClient.subscribe("/topic/" + roomId, function (messageOutput) {
-                console.log("📨 New message received:", messageOutput.body);
-                showMessage(JSON.parse(messageOutput.body));
-            });
-            console.log("🔔 Subscribed to /topic/" + roomId);
-        } else {
-            console.error("❌ Cannot subscribe: WebSocket not connected");
-        }
-    }
-
-
-    async function loadMessageHistory(roomId) {
-        try {
-            const response = await fetch(`/api/messages/${roomId}`);
-            if (response.ok) {
-                const messages = await response.json();
-
-
-                const chatBox = document.getElementById("chatBox");
-                chatBox.innerHTML = "";
-
-
-                messages.forEach(message => {
-                    showMessage(message);
+            if (stompClient && stompClient.connected) {
+                currentSubscription = stompClient.subscribe("/topic/" + roomId, function (messageOutput) {
+                    console.log("📨 New message received:", messageOutput.body);
+                    showMessage(JSON.parse(messageOutput.body));
                 });
-            }
-        } catch (err) {
-            console.error("Error loading message history:", err);
-        }
-    }
-
-    function sendMessage(event) {
-        event.preventDefault();
-        const messageInput = document.getElementById("message");
-        const messageContent = messageInput.value.trim();
-
-        if (messageContent && stompClient) {
-            const chatMessage = {
-                sender: currentUsername,
-                content: messageContent
-            };
-            stompClient.send("/app/chat/" + currentRoom, {}, JSON.stringify(chatMessage));
-            messageInput.value = "";
-        }
-    }
-
-     function showMessage(message) {
-    const chatBox = document.getElementById("chatBox");
-
-    const messageElement = document.createElement("div");
-    messageElement.classList.add("message");
-
-    if (message.sender === currentUsername) {
-        messageElement.classList.add("message-sent");
-    } else {
-        messageElement.classList.add("message-received");
-    }
-
-    const senderElement = document.createElement("div");
-    senderElement.classList.add("sender");
-    senderElement.textContent = (message.sender === currentUsername) ? "You" : message.sender;
-
-    const textElement = document.createElement("div");
-    textElement.classList.add("text");
-    textElement.textContent = message.content;
-
-    const timeElement = document.createElement("div");
-timeElement.classList.add("timestamp");
-
-const date = new Date(message.timestamp);
-const hours = date.getHours().toString().padStart(2, '0');
-const minutes = date.getMinutes().toString().padStart(2, '0');
-timeElement.textContent = `${hours}:${minutes}`;
-
-
-    messageElement.appendChild(senderElement);
-    messageElement.appendChild(textElement);
-    messageElement.appendChild(timeElement);
-    chatBox.appendChild(messageElement);
-
-    chatBox.scrollTop = chatBox.scrollHeight;
-}
-
-
-    async function loadRooms() {
-        try {
-            const response = await fetch("/api/rooms");
-            const rooms = await response.json();
-
-            const roomsList = document.getElementById("roomsList");
-            roomsList.innerHTML = "";
-
-            rooms.forEach(room => {
-                const li = document.createElement("li");
-                li.textContent = "#" + room.name;
-                li.onclick = () => window.location.href = "/chat/" + room.name;
-                if (room.name === currentRoomName) li.classList.add("active");
-                roomsList.appendChild(li);
-            });
-        } catch (err) {
-            console.error("Error loading rooms", err);
-        }
-    }
-
-    async function createRoom(event) {
-        event.preventDefault();
-        const name = document.getElementById("newRoomName").value.trim();
-        if (!name) return;
-
-        try {
-            const response = await fetch("/api/rooms", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name })
-            });
-
-            if (response.ok) {
-                document.getElementById("newRoomName").value = "";
-                await loadRooms();
-                window.location.href = "/chat/" + name;
+                console.log("🔔 Subscribed to /topic/" + roomId);
             } else {
-                alert("Failed to create room");
+                console.error("❌ Cannot subscribe: WebSocket not connected");
             }
-        } catch (err) {
-            console.error("Error creating room", err);
         }
-    }
 
-    document.addEventListener('DOMContentLoaded', () => {
-        connect();
-        loadRooms();
-        document.getElementById("createRoomForm").addEventListener("submit", createRoom);
-    });
 
-    document.getElementById('messageForm').addEventListener('submit', sendMessage);
-</script>
+        async function loadMessageHistory(roomId) {
+            try {
+                const response = await fetch(`/api/messages/${roomId}`);
+                if (response.ok) {
+                    const messages = await response.json();
+
+
+                    const chatBox = document.getElementById("chatBox");
+                    chatBox.innerHTML = "";
+
+
+                    messages.forEach(message => {
+                        showMessage(message);
+                    });
+                }
+            } catch (err) {
+                console.error("Error loading message history:", err);
+            }
+        }
+
+        function sendMessage(event) {
+            event.preventDefault();
+            const messageInput = document.getElementById("message");
+            const messageContent = messageInput.value.trim();
+
+            if (messageContent && stompClient) {
+                const chatMessage = {
+                    sender: currentUsername,
+                    content: messageContent
+                };
+                if (currentMode === 'dm') {
+                    stompClient.send("/app/dm/" + currentDmUser, {}, JSON.stringify(chatMessage));
+                } else {
+                    stompClient.send("/app/chat/" + currentRoom, {}, JSON.stringify(chatMessage));
+                }
+                messageInput.value = "";
+            }
+        }
+
+        // ---- Glass avatar chips ----
+
+        const avatarGradients = [
+            ["#f472b6", "#a855f7"], // pink → purple
+            ["#34d399", "#06b6d4"], // emerald → cyan
+            ["#fbbf24", "#f97316"], // amber → orange
+            ["#818cf8", "#06b6d4"], // indigo → cyan
+            ["#fb7185", "#e11d48"], // rose → pink
+            ["#a78bfa", "#6366f1"], // violet → indigo
+            ["#2dd4bf", "#10b981"]  // teal → emerald
+        ];
+
+        function getInitials(name) {
+            const parts = name.trim().split(/\s+/).filter(Boolean);
+            if (parts.length === 0) return "?";
+            if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+            return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+        }
+
+        function avatarGradientFor(name) {
+            let hash = 0;
+            for (let i = 0; i < name.length; i++) {
+                hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+            }
+            return avatarGradients[hash % avatarGradients.length];
+        }
+
+        function showMessage(message) {
+            const chatBox = document.getElementById("chatBox");
+            const isSent = message.sender === currentUsername;
+            const displayName = isSent ? "You" : message.sender;
+
+            // Outer row: avatar chip + bubble side by side
+            const row = document.createElement("div");
+            row.classList.add("message-row");
+            if (isSent) row.classList.add("sent");
+
+            // Glass avatar chip with the sender's initials
+            const avatar = document.createElement("div");
+            avatar.classList.add("avatar-chip");
+            const [from, to] = avatarGradientFor(message.sender);
+            avatar.style.background = `linear-gradient(135deg, ${from}, ${to})`;
+            avatar.textContent = getInitials(message.sender);
+
+            // Bubble + "sender · time" caption
+            const wrapper = document.createElement("div");
+            wrapper.classList.add("bubble-wrap");
+
+            const bubble = document.createElement("div");
+            bubble.classList.add("message", isSent ? "message-sent" : "message-received");
+
+            const textElement = document.createElement("div");
+            textElement.classList.add("text");
+            textElement.textContent = message.content;
+            bubble.appendChild(textElement);
+
+            const meta = document.createElement("div");
+            meta.classList.add("meta");
+            const date = new Date(message.timestamp);
+            const hours = date.getHours().toString().padStart(2, '0');
+            const minutes = date.getMinutes().toString().padStart(2, '0');
+            meta.textContent = `${displayName} · ${hours}:${minutes}`;
+
+            wrapper.appendChild(bubble);
+            wrapper.appendChild(meta);
+
+            if (isSent) {
+                row.appendChild(wrapper);
+                row.appendChild(avatar);
+            } else {
+                row.appendChild(avatar);
+                row.appendChild(wrapper);
+            }
+
+            chatBox.appendChild(row);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+
+        // ===================== Direct messages =====================
+
+        function subscribeToDmTopic() {
+            if (!stompClient || !stompClient.connected) return;
+            stompClient.subscribe("/topic/dm/" + currentUsername, function (messageOutput) {
+                const payload = JSON.parse(messageOutput.body);
+                onDmMessage(payload);
+            });
+        }
+
+        function onDmMessage(payload) {
+            const viewingThisDm = currentMode === "dm" && payload.sender === currentDmUser;
+            if (viewingThisDm) {
+                showMessage(payload);
+                markDmRead(currentDmUser);
+            } else if (currentMode === "dm" && payload.sender === currentUsername && payload.recipient === currentDmUser) {
+                showMessage(payload); // my own echo from another tab
+            }
+            loadConversations(); // refresh badge + ordering
+        }
+
+        async function loadConversations() {
+            try {
+                const response = await fetch(`/api/dm/conversations?user=${encodeURIComponent(currentUsername)}`);
+                if (response.ok) {
+                    renderConversations(await response.json());
+                }
+            } catch (err) {
+                console.error("Error loading DM conversations:", err);
+            }
+        }
+
+        function formatDmTime(iso) {
+            if (!iso) return "";
+            const date = new Date(iso);
+            const now = new Date();
+            if (date.toDateString() === now.toDateString()) {
+                return date.getHours().toString().padStart(2, "0") + ":" + date.getMinutes().toString().padStart(2, "0");
+            }
+            return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        }
+
+        function renderConversations(conversations) {
+            const listEl = document.getElementById("dmList");
+            listEl.innerHTML = "";
+            if (!conversations || conversations.length === 0) {
+                const empty = document.createElement("li");
+                empty.className = "dm-empty";
+                empty.textContent = "No conversations yet";
+                listEl.appendChild(empty);
+                return;
+            }
+            conversations.forEach(c => {
+                const li = document.createElement("li");
+                li.className = "dm-item" + (currentMode === "dm" && c.username === currentDmUser ? " active" : "");
+                li.onclick = () => activateDm(c.username);
+
+                const avatar = document.createElement("span");
+                avatar.className = "avatar-chip";
+                const [from, to] = avatarGradientFor(c.username);
+                avatar.style.background = `linear-gradient(135deg, ${from}, ${to})`;
+                avatar.textContent = getInitials(c.username);
+
+                const body = document.createElement("div");
+                body.className = "dm-body";
+
+                const top = document.createElement("div");
+                top.className = "dm-top";
+                const name = document.createElement("span");
+                name.className = "dm-name";
+                name.textContent = c.username;
+                const statusDot = document.createElement("span");
+                statusDot.className = "dot " + (c.online ? "dot-online" : "dot-offline");
+                top.appendChild(name);
+                top.appendChild(statusDot);
+
+                const bottom = document.createElement("div");
+                bottom.className = "dm-bottom";
+                const preview = document.createElement("span");
+                preview.className = "dm-preview";
+                preview.textContent = c.lastMessage || "Start a conversation";
+                const time = document.createElement("span");
+                time.className = "dm-time";
+                time.textContent = formatDmTime(c.lastTimestamp);
+                bottom.appendChild(preview);
+                bottom.appendChild(time);
+
+                body.appendChild(top);
+                body.appendChild(bottom);
+                li.appendChild(avatar);
+                li.appendChild(body);
+
+                if (c.unread > 0) {
+                    const badge = document.createElement("span");
+                    badge.className = "dm-badge";
+                    badge.textContent = c.unread > 99 ? "99+" : c.unread;
+                    li.appendChild(badge);
+                }
+                listEl.appendChild(li);
+            });
+        }
+
+        async function loadDmHistory(username) {
+            try {
+                const response = await fetch(`/api/dm/messages/${encodeURIComponent(username)}?user=${encodeURIComponent(currentUsername)}`);
+                if (response.ok) {
+                    const messages = await response.json();
+                    const chatBox = document.getElementById("chatBox");
+                    chatBox.innerHTML = "";
+                    messages.forEach(showMessage);
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                }
+            } catch (err) {
+                console.error("Error loading DM history:", err);
+            }
+        }
+
+        function markDmRead(username) {
+            fetch(`/api/dm/${encodeURIComponent(username)}/read?user=${encodeURIComponent(currentUsername)}`, { method: "POST" })
+                .catch(() => {});
+        }
+
+        async function fetchDmStatus(username) {
+            try {
+                const response = await fetch(`/api/dm/status/${encodeURIComponent(username)}`);
+                if (response.ok) {
+                    const status = await response.json();
+                    setDmStatus(status.online);
+                }
+            } catch (err) {
+                console.error("Error fetching DM status:", err);
+            }
+        }
+
+        function setDmStatus(online) {
+            const label = online ? "Active now" : "Offline";
+            for (const id of ["dmHeaderDot", "popDot"]) {
+                const dot = document.getElementById(id);
+                dot.classList.toggle("dot-online", online);
+                dot.classList.toggle("dot-offline", !online);
+            }
+            document.getElementById("dmHeaderStatusText").textContent = label;
+            document.getElementById("popStatusText").textContent = label;
+        }
+
+        function showDmHeader(username) {
+            document.getElementById("channelHeader").classList.add("hidden");
+            const dmHeader = document.getElementById("dmHeader");
+            dmHeader.classList.remove("hidden");
+            dmHeader.classList.add("flex");
+
+            for (const id of ["dmHeaderAvatar", "popAvatar"]) {
+                const avatar = document.getElementById(id);
+                const [from, to] = avatarGradientFor(username);
+                avatar.style.background = `linear-gradient(135deg, ${from}, ${to})`;
+                avatar.textContent = getInitials(username);
+            }
+            document.getElementById("dmHeaderName").textContent = "@" + username;
+            document.getElementById("popName").textContent = "@" + username;
+            setDmStatus(false);
+        }
+
+        async function enterDm() {
+            showDmHeader(currentDmUser);
+            fetchDmStatus(currentDmUser);
+            await loadDmHistory(currentDmUser);
+            markDmRead(currentDmUser);
+            loadConversations();
+        }
+
+        function activateDm(username) {
+            currentMode = "dm";
+            currentDmUser = username;
+            if (currentSubscription) {
+                currentSubscription.unsubscribe();
+                currentSubscription = null;
+            }
+            enterDm();
+            history.pushState({}, "", "/chat/dm/" + encodeURIComponent(username));
+            if (window.innerWidth < 768) closeSidebar();
+        }
+
+        async function searchUsers(q) {
+            try {
+                const response = await fetch(`/api/dm/users?q=${encodeURIComponent(q)}&user=${encodeURIComponent(currentUsername)}`);
+                if (!response.ok) return;
+                renderUserResults(await response.json());
+            } catch (err) {
+                console.error("Error searching users:", err);
+            }
+        }
+
+        function renderUserResults(users) {
+            const resultsEl = document.getElementById("dmSearchResults");
+            resultsEl.innerHTML = "";
+            if (!users || users.length === 0) {
+                const li = document.createElement("li");
+                li.className = "dm-empty";
+                li.textContent = "No users found";
+                resultsEl.appendChild(li);
+                return;
+            }
+            users.forEach(u => {
+                const li = document.createElement("li");
+                li.className = "dm-item";
+                const avatar = document.createElement("span");
+                avatar.className = "avatar-chip";
+                const [from, to] = avatarGradientFor(u);
+                avatar.style.background = `linear-gradient(135deg, ${from}, ${to})`;
+                avatar.textContent = getInitials(u);
+                const name = document.createElement("span");
+                name.className = "dm-name";
+                name.textContent = u;
+                li.appendChild(avatar);
+                li.appendChild(name);
+                li.onclick = () => {
+                    document.getElementById("dmSearchWrap").classList.add("hidden");
+                    document.getElementById("dmSearch").value = "";
+                    resultsEl.innerHTML = "";
+                    activateDm(u);
+                };
+                resultsEl.appendChild(li);
+            });
+        }
+
+        async function loadRooms() {
+            try {
+                const response = await fetch("/api/rooms");
+                const rooms = await response.json();
+
+                const roomsList = document.getElementById("roomsList");
+                roomsList.innerHTML = "";
+
+                rooms.forEach(room => {
+                    const li = document.createElement("li");
+                    li.textContent = "#" + room.name;
+                    li.onclick = () => window.location.href = "/chat/" + room.name;
+                    if (room.name === currentRoomName) li.classList.add("active");
+                    roomsList.appendChild(li);
+                });
+            } catch (err) {
+                console.error("Error loading rooms", err);
+            }
+        }
+
+        async function createRoom(event) {
+            event.preventDefault();
+            const name = document.getElementById("newRoomName").value.trim();
+            if (!name) return;
+
+            try {
+                const response = await fetch("/api/rooms", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name })
+                });
+
+                if (response.ok) {
+                    document.getElementById("newRoomName").value = "";
+                    await loadRooms();
+                    window.location.href = "/chat/" + name;
+                } else {
+                    alert("Failed to create room");
+                }
+            } catch (err) {
+                console.error("Error creating room", err);
+            }
+        }
+
+        // ---- Mobile drawer toggle ----
+        const sidebarEl = document.getElementById("sidebar");
+        const sidebarBackdrop = document.getElementById("sidebarBackdrop");
+        const sidebarToggle = document.getElementById("sidebarToggle");
+
+        function openSidebar() {
+            sidebarEl.classList.remove("-translate-x-full");
+            sidebarBackdrop.classList.remove("opacity-0", "pointer-events-none");
+        }
+
+        function closeSidebar() {
+            sidebarEl.classList.add("-translate-x-full");
+            sidebarBackdrop.classList.add("opacity-0", "pointer-events-none");
+        }
+
+        sidebarToggle.addEventListener("click", openSidebar);
+        sidebarBackdrop.addEventListener("click", closeSidebar);
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") closeSidebar();
+        });
+
+        // ---- Channels collapse toggle ----
+        const channelsChevron = document.getElementById("channelsChevron");
+        const channelsChevronIcon = document.getElementById("channelsChevronIcon");
+        const channelsBody = document.getElementById("channelsBody");
+
+        channelsChevron.addEventListener("click", () => {
+            const open = channelsBody.getAttribute("data-collapse") === "open";
+            channelsBody.setAttribute("data-collapse", open ? "closed" : "open");
+            channelsChevronIcon.innerHTML = open
+                ? '<path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" />'
+                : '<path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />';
+        });
+
+        // ---- Full sidebar collapse toggle (desktop) ----
+        const sidebarCollapseToggle = document.getElementById("sidebarCollapseToggle");
+        const sidebarCollapseIcon = document.getElementById("sidebarCollapseIcon");
+        const sidebarBackdropDesktop = document.getElementById("sidebarBackdropDesktop");
+
+        sidebarCollapseToggle.addEventListener("click", () => {
+            const hidden = sidebarEl.classList.toggle("sidebar-hidden");
+            sidebarCollapseIcon.innerHTML = hidden
+                ? '<path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" />'
+                : '<path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />';
+            sidebarBackdropDesktop.classList.toggle("hidden", !hidden);
+            sidebarBackdropDesktop.classList.toggle("opacity-0", !hidden);
+            sidebarBackdropDesktop.classList.toggle("pointer-events-none", !hidden);
+        });
+
+        sidebarBackdropDesktop.addEventListener("click", () => {
+            if (sidebarEl.classList.contains("sidebar-hidden")) {
+                sidebarEl.classList.remove("sidebar-hidden");
+                sidebarCollapseIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />';
+                sidebarBackdropDesktop.classList.add("opacity-0", "pointer-events-none");
+                setTimeout(() => sidebarBackdropDesktop.classList.add("hidden"), 300);
+            }
+        });
+
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape" && sidebarEl.classList.contains("sidebar-hidden")) {
+                sidebarEl.classList.remove("sidebar-hidden");
+                sidebarCollapseIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />';
+                sidebarBackdropDesktop.classList.add("opacity-0", "pointer-events-none");
+                setTimeout(() => sidebarBackdropDesktop.classList.add("hidden"), 300);
+            }
+        });
+
+        // ---- New DM search + profile popover + back/forward ----
+        const dmToggle = document.getElementById("dmToggle");
+        const dmSearchWrap = document.getElementById("dmSearchWrap");
+        const dmSearch = document.getElementById("dmSearch");
+        const dmProfileBtn = document.getElementById("dmProfileBtn");
+        const dmProfilePopover = document.getElementById("dmProfilePopover");
+
+        let dmSearchTimer = null;
+
+        dmToggle.addEventListener("click", () => {
+            dmSearchWrap.classList.toggle("hidden");
+            if (!dmSearchWrap.classList.contains("hidden")) {
+                dmSearch.focus();
+                dmSearch.value = "";
+                document.getElementById("dmSearchResults").innerHTML = "";
+            }
+        });
+
+        dmSearch.addEventListener("input", (e) => {
+            clearTimeout(dmSearchTimer);
+            const q = e.target.value.trim();
+            if (!q) {
+                document.getElementById("dmSearchResults").innerHTML = "";
+                return;
+            }
+            dmSearchTimer = setTimeout(() => searchUsers(q), 250);
+        });
+
+        dmProfileBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            dmProfilePopover.classList.toggle("hidden");
+        });
+
+        document.addEventListener("click", (e) => {
+            if (!dmProfilePopover.classList.contains("hidden")
+                && !dmProfilePopover.contains(e.target)
+                && e.target !== dmProfileBtn) {
+                dmProfilePopover.classList.add("hidden");
+            }
+        });
+
+        // Browser back/forward for in-place DM switching
+        window.addEventListener("popstate", () => {
+            const match = location.pathname.match(/^\/chat\/dm\/([^/]+)$/);
+            if (match) {
+                currentMode = "dm";
+                currentDmUser = decodeURIComponent(match[1]);
+                enterDm();
+            } else {
+                location.reload();
+            }
+        });
+
+        // Refresh the channel list whenever the sidebar is open
+        const prevInterval = setInterval(() => {
+            if (document.getElementById("dmSearchWrap").classList.contains("hidden")) {
+                loadConversations();
+            }
+            if (currentMode === "dm") {
+                fetchDmStatus(currentDmUser);
+            }
+            // Preserve the collapsible channels state across refreshes
+            if (!channelsBody.getAttribute("data-collapse") || channelsBody.getAttribute("data-collapse") === "open") {
+                loadRooms();
+            }
+        }, 20000);
+
+        document.addEventListener('DOMContentLoaded', () => {
+            connect();
+            loadRooms();
+            document.getElementById("createRoomForm").addEventListener("submit", createRoom);
+        });
+
+        document.getElementById('messageForm').addEventListener('submit', sendMessage);
+
+        // Keep the collapsible channel list populated on first paint and after room refreshes
+        const refreshChannels = () => {
+            if (!channelsBody.getAttribute("data-collapse") || channelsBody.getAttribute("data-collapse") === "open") {
+                loadRooms();
+            }
+        };
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshChannels();
+        });
+    </script>
 
 </body>
 </html>

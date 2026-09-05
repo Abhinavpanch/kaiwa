@@ -36,6 +36,13 @@ public class ViewController {
         return "register";
     }
 
+    @GetMapping("/chat/dm/{username}")
+    public String dmChat(@PathVariable String username, Model model) {
+        model.addAttribute("dmMode", true);
+        model.addAttribute("dmUser", username);
+        return "chat";
+    }
+
     @GetMapping("/chat/{roomName}")
     public String chat(@PathVariable String roomName, Model model) {
 
